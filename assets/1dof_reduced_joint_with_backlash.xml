@@ -1,0 +1,63 @@
+<mujoco model="1dof_joint_warp">
+    <compiler angle="radian" autolimits="true" inertiafromgeom="true"/>
+    
+    <!-- 
+       Warp 仿真参数设置 
+       注意：Warp通常会忽略这里的timestep，而是使用yaml配置中的dt
+    -->
+    <option integrator="RK4" gravity="0 0 -9.81"/>
+  
+    <default>
+      <joint damping="0.02" frictionloss="0.05" armature="0.005"/>
+      <geom type="cylinder" size="0.05 0.02" rgba="0.7 0.7 0.7 1"/>
+    </default>
+  
+    <worldbody>
+      <!-- 地面物理实体 (无纹理) -->
+      <geom name="floor" type="plane" size="0 0 0.1" rgba="0.8 0.8 0.8 1"/>
+  
+      <!-- 基座 -->
+      <body name="base_link" pos="0 0 0.5">
+        <geom type="box" size="0.06 0.06 0.06" rgba="0.2 0.2 0.2 1" mass="5.0"/>
+        <geom type="cylinder" size="0.05 0.08" quat="0.707 0 0.707 0" pos="0.08 0 0" rgba="0.3 0.3 0.3 1" mass="1.0"/>
+  
+        <!-- 理想输出轴 -->
+        <body name="gearbox_output_shaft" pos="0.2 0 0" euler="0 1.5708 0">
+          <!-- 
+             DOF 1: 理想关节 (被电机驱动) 
+          -->
+          <joint name="joint_ideal" type="hinge" axis="0 0 1" range="-3.14 3.14"/>
+          <geom type="cylinder" size="0.015 0.02" rgba="0.9 0.5 0.1 1" mass="0.1"/>
+  
+          <!-- 实际负载 -->
+          <body name="actual_load" pos="0 0 0">
+            <!-- 
+               DOF 2: 回差关节 (被动)
+               Warp 会识别到这个关节，所以系统的总 DOF 会变成 2
+            -->
+            <joint name="joint_backlash" type="hinge" axis="0 0 1" 
+                   range="-0.01 0.01" limited="true" 
+                   stiffness="0" damping="0.001" frictionloss="0" armature="0"/>
+            
+            <inertial pos="0.15 0 0" mass="0.5" diaginertia="0.005 0.005 0.005"/>
+            <geom type="box" size="0.15 0.02 0.005" pos="0.15 0 0" rgba="0 0.5 0.8 1"/>
+            <geom type="sphere" size="0.03" pos="0.3 0 0" rgba="1 0 0 1" mass="0.2"/>
+          </body>
+        </body>
+      </body>
+    </worldbody>
+  
+    <!-- 
+      Warp 需要显式的排除碰撞，否则可能会报错或计算错误
+    -->
+    <contact>
+      <exclude body1="base_link" body2="actual_load"/>
+    </contact>
+  
+    <actuator>
+      <!-- 
+         Warp 解析器通常只看 joint name 和 gear
+      -->
+      <motor name="motor_driver" joint="joint_ideal" gear="6" ctrllimited="true" ctrlrange="-5 5"/>
+    </actuator>
+  </mujoco>

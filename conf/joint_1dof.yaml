@@ -1,0 +1,33 @@
+defaults:
+  - base_config
+  - _self_  # 【关键修改】修复 Hydra 1.1+ 的组合顺序警告
+
+task:
+  name: "joint_1dof"
+  
+  # 理想关节 + 回差关节 = 2 DOF
+  dof: 2
+  
+  num_envs: 64
+  frame_dt: 0.01
+  sim_substeps: 10
+  episode_duration: 5.0
+  
+  train:
+    batch_size: 128
+    lr: 1e-3
+    epochs: 10
+    history_len: 10
+    
+  model:
+    hidden_dim: 64
+    n_layer: 2
+    n_head: 4
+    use_contact: False 
+    
+  dataset:
+    num_trajectories: 1000
+    
+hydra:
+  run:
+    dir: ./outputs/${task.name}/${now:%Y-%m-%d_%H-%M-%S}
