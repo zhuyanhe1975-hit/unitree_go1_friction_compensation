@@ -1,18 +1,22 @@
-<mujoco model="1dof_joint_realistic">
+<mujoco model="unitree_go_m8010_6_1dof">
   <compiler angle="radian" autolimits="true" inertiafromgeom="true"/>
-  <!-- 减小步长有助于高速碰撞时的稳定性 -->
+  <!--
+    Target actuator: Unitree GO-M8010-6
+    - Command/feedback are output-side (per SDK protocol): q(rad), dq(rad/s), tau(Nm)
+    - Reduction ratio: 1:6.33 (not explicitly modeled as separate motor/output joints here)
+    - Max output torque: 23.7 Nm, max output speed: 30 rad/s
+  -->
   <option timestep="0.001" integrator="RK4" gravity="0 0 -9.81">
     <flag contact="enable" energy="enable"/>
   </option>
 
   <default>
     <!-- 
-       【参数回调】
-       damping: 0.5 -> 0.1 (恢复较为真实的低阻尼)
-       frictionloss: 0.2 (保留干摩擦，这是真实的)
-       armature: 0.05 (保留转子惯量，这对稳定性很重要)
+       Joint-level dissipations are placeholders and should be fitted from real data.
+       Use config.json -> sim.mjcf_override to set global damping/armature overrides in Warp.
     -->
-    <joint damping="0.1" frictionloss="0.2" armature="0.05"/>
+    <!-- frictionloss ~ Coulomb friction torque (Nm). armature ~ added joint inertia (kg*m^2). -->
+    <joint damping="0.02" frictionloss="0.05" armature="0.0044814"/>
     <geom type="capsule" size="0.02" rgba="0.7 0.7 0.7 1"/>
   </default>
 
@@ -25,25 +29,22 @@
       <geom type="capsule" size="0.05" fromto="0 0 0 0.08 0 0" quat="0.707 0 0.707 0" rgba="0.3 0.3 0.3 1" mass="1.0"/>
 
       <!-- 理想输出轴 -->
-      <body name="gearbox_output_shaft" pos="0.2 0 0" euler="0 1.5708 0">
+        <body name="gearbox_output_shaft" pos="0.2 0 0" euler="0 1.5708 0">
+        <!-- Small link inertia placeholder (most inertia is in armature + attached load). -->
+        <inertial pos="0 0 0" mass="0.2" diaginertia="0.00005 0.00005 0.00005"/>
         <!-- 
-           【关键修复】limited="true"
-           强制物理引擎在到达角度极限时施加硬约束
+           Output shaft (what GO-M8010-6 reports as q/dq/tau).
         -->
         <joint name="joint_ideal" type="hinge" axis="0 0 1" 
-               range="-3.0 3.0" limited="true"/>
+               limited="false"/>
         
         <geom type="capsule" size="0.015" fromto="0 0 0 0 0 0.02" rgba="0.9 0.5 0.1 1" mass="0.1"/>
 
-        <!-- 实际负载 -->
+        <!-- 实际负载（用于匹配“单关节实物”量级；不引入长摆臂） -->
         <body name="actual_load" pos="0 0 0">
-          <joint name="joint_backlash" type="hinge" axis="0 0 1" 
-                 range="-0.01 0.01" limited="true" 
-                 stiffness="0" damping="0.01" frictionloss="0" armature="0"/>
-          
-          <inertial pos="0.15 0 0" mass="0.5" diaginertia="0.005 0.005 0.005"/>
-          <geom type="box" size="0.15 0.02 0.005" pos="0.15 0 0" rgba="0 0.5 0.8 1"/>
-          <geom type="sphere" size="0.03" pos="0.3 0 0" rgba="1 0 0 1" mass="0.2"/>
+          <!-- Rough inertial placeholder: Izz ~ 0.005 kg*m^2 order -->
+          <inertial pos="0.05 0 0" mass="0.3" diaginertia="0.0002 0.0002 0.005"/>
+          <geom type="capsule" size="0.02" fromto="0 0 0 0.10 0 0" rgba="0 0.5 0.8 1"/>
         </body>
       </body>
     </body>
@@ -54,6 +55,7 @@
   </contact>
 
   <actuator>
-    <motor name="motor_driver" joint="joint_ideal" gear="6" ctrllimited="true" ctrlrange="-5 5"/>
+    <!-- Output-side torque command (Nm): match GO-M8010-6 protocol -->
+    <motor name="motor_driver" joint="joint_ideal" gear="1" ctrllimited="true" ctrlrange="-23.7 23.7"/>
   </actuator>
 </mujoco>

@@ -1,1 +1,0 @@
-# NeRD Core Module

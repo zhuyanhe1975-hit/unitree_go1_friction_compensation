@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+
+# Runtime outputs
+runs/*.png
+runs/*.pt
+runs/*.npz
+runs/mjcf_patched.xml
+runs/warp_cache/
+
+# Keep the Unitree SDK build artifacts out of git (rebuildable)
+runs/unitree_sdk_build/
+
+# Legacy preview generated under sudo can become root-owned
+real_data_preview.png

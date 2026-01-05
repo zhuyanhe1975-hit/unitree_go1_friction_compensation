@@ -1,0 +1,112 @@
+{
+  "project": {
+    "name": "nerd_1dof_goM8010_6",
+    "seed": 42
+  },
+  "paths": {
+    "asset_mjcf": "assets/joint_1dof.xml",
+    "runs_dir": "runs",
+    "sim_raw_log": "runs/sim_raw.npz",
+    "sim_dataset": "runs/sim_dataset.npz",
+    "real_dataset": "runs/real_dataset.npz",
+    "stats_npz": "runs/stats.npz",
+    "real_stats_npz": "runs/real_stats.npz",
+    "sim_model": "runs/sim_model.pt",
+    "real_model": "runs/real_model.pt",
+    "real_model_scratch": "runs/real_model_scratch.pt",
+    "real_log": "runs/real_log.npz"
+  },
+  "sim": {
+    "device": "cuda",
+    "num_envs": 512,
+    "frame_dt": 0.01,
+    "sim_substeps": 10,
+    "mjcf_override": {
+      "stiffness": 0.0,
+      "damping": 0.010532295580242577,
+      "armature": 0.00018379763119212255,
+      "frictionloss": 0.032630030866283334,
+      "contact_ke": 10000.0,
+      "contact_kd": 100.0
+    }
+  },
+  "motor": {
+    "model": "GO-M8010-6",
+    "gear_ratio": 6.33,
+    "torque_constant_out_nm_per_a": 0.63895,
+    "max_torque_out_nm": 23.7,
+    "max_speed_out_rad_s": 30.0,
+    "encoder_resolution_bits": 15,
+    "mass_kg": null,
+    "rotor_inertia_kg_m2": 0.000111842
+  },
+  "friction": {
+    "tau_static_out_nm": 0.05
+  },
+  "model": {
+    "history_len": 10,
+    "embed_dim": 64,
+    "num_layers": 2,
+    "num_heads": 4
+  },
+  "train": {
+    "steps": 400,
+    "warmup_steps": 10,
+    "action_uniform_low": -2.0,
+    "action_uniform_high": 2.0,
+    "batch_size": 4096,
+    "lr": 0.001,
+    "epochs": 50,
+    "finetune_lr": 5e-05,
+    "finetune_epochs": 20
+  },
+  "data": {
+    "sim": {
+      "num_trajectories": 256,
+      "steps": 400,
+      "profile": "chirp",
+      "torque_low": -0.5,
+      "torque_high": 0.5,
+      "tau_slew_nm_s": 50.0,
+      "chirp": {
+        "f0_hz": 0.1,
+        "f1_hz": 5.0,
+        "amplitude_nm": 0.45
+      }
+    },
+    "real": {
+      "qd_source": "from_q",
+      "qd_lpf_hz": 30.0,
+      "d_stats": "real",
+      "action_key": "tau_out",
+      "tau_out_scale_to_out": false
+    },
+    "prepare": {
+      "val_ratio": 0.1
+    }
+  },
+  "eval": {
+    "plot_steps": 2000
+  },
+  "real": {
+    "serial_port": "/dev/ttyUSB0",
+    "motor_id": 0,
+    "unitree_sdk_lib": "runs/unitree_sdk_build/lib",
+    "kp": 0.0,
+    "kd": 0.0,
+    "dt": 0.01,
+    "duration": 60.0,
+    "max_torque": 0.5,
+    "efficiency": 0.8,
+    "unwrap_motor_angle": true,
+    "tau_slew_nm_s": 50.0,
+    "temp_limit_c": 80.0,
+    "abort_on_merror": true,
+    "tau_static_enable_threshold_nm": 0.02,
+    "chirp": {
+      "f0_hz": 0.1,
+      "f1_hz": 2.0,
+      "amplitude_nm": 0.25
+    }
+  }
+}
