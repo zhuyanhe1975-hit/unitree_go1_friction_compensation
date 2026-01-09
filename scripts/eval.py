@@ -126,6 +126,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default=None)
     ap.add_argument("--model", choices=["sim", "real", "real_scratch", "all"], default="all")
+    ap.add_argument(
+        "--residual_model",
+        default=None,
+        help="optional residual model path (default: <model_path> with _residual suffix if exists)",
+    )
     args = ap.parse_args()
 
     cfg = load_cfg(args.config)
@@ -155,6 +160,7 @@ def main() -> None:
     sim_model_path = str(get(cfg, "paths.sim_model"))
     real_model_path = str(get(cfg, "paths.real_model"))
     real_scratch_path = str(get(cfg, "paths.real_model_scratch"))
+    residual_cli = args.residual_model
 
     if args.model in ("sim", "all"):
         eval_one(sim_model_path, sim_dataset_path, "sim_model on sim_dataset")
@@ -173,6 +179,15 @@ def main() -> None:
 
     if plt is None:
         return
+
+    def _resolve_residual_path(base_path: str) -> str | None:
+        if residual_cli:
+            return residual_cli
+        if not base_path or "." not in base_path:
+            return None
+        stem, ext = base_path.rsplit(".", 1)
+        cand = f"{stem}_residual.{ext}"
+        return cand if os.path.exists(cand) else None
 
     # Plot a quick one-step prediction trace for sim (delta_q)
     plot_steps = int(get(cfg, "eval.plot_steps", required=False, default=2000))
@@ -262,6 +277,10 @@ def main() -> None:
         if not os.path.exists(dataset_path):
             print(f"[skip] dataset not found for {out_prefix}: {dataset_path}")
             return
+        residual_path = _resolve_residual_path(model_path)
+        if residual_path and not os.path.exists(residual_path):
+            residual_path = None
+
         real_ds = dict(np.load(dataset_path, allow_pickle=True))
         x_real = real_ds["x"].astype(np.float32)
         y_real_norm = real_ds["y"].astype(np.float32)
@@ -270,8 +289,18 @@ def main() -> None:
         n_plot = min(plot_steps, x_real.shape[0])
 
         model_real = _load_model(cfg, model_path, device=device)
+        model_res = _load_model(cfg, residual_path, device=device) if residual_path else None
+
+        def _pred_total(xb: np.ndarray) -> np.ndarray:
+            with torch.no_grad():
+                base = model_real(torch.from_numpy(xb).float().to(device))
+                if model_res is not None:
+                    res = model_res(torch.from_numpy(xb).float().to(device))
+                    return (base + res).detach().cpu().numpy()
+                return base.detach().cpu().numpy()
+
         with torch.no_grad():
-            pred_norm = model_real(torch.from_numpy(x_real[:n_plot]).float().to(device)).cpu().numpy()
+            pred_norm = _pred_total(x_real[:n_plot])
         y_pred = pred_norm * d_std + d_mean
         y_true = y_real_norm[:n_plot] * d_std + d_mean
 
@@ -288,7 +317,8 @@ def main() -> None:
         plt.grid(True, alpha=0.3)
         plt.legend()
 
-        out = os.path.join(get(cfg, "paths.runs_dir"), f"eval_{out_prefix}_delta.png")
+        suffix = "_residual" if model_res is not None else ""
+        out = os.path.join(get(cfg, "paths.runs_dir"), f"eval_{out_prefix}_delta{suffix}.png")
         ensure_dir(os.path.dirname(out) or ".")
         plt.tight_layout()
         plt.savefig(out)
@@ -314,15 +344,50 @@ def main() -> None:
 
             stats = _stats_from_prepared(real_ds)
 
-            q_pred_roll, qd_pred_roll = _rollout_open_loop(
-                model_real,
-                stats=stats,
-                q0=float(q_log[0]),
-                qd0=float(qd_log[0]),
-                tau_cmd=tau_log[:n],
-                history_len=int(get(cfg, "model.history_len")),
-                device=device,
-            )
+            # rollout with combined model
+            def _rollout_combined(
+                model_base: CausalTransformer, model_residual: CausalTransformer | None, stats: dict
+            ) -> tuple[np.ndarray, np.ndarray]:
+                q_hist = [float(q_log[0])] * int(get(cfg, "model.history_len"))
+                qd_hist = [float(qd_log[0])] * int(get(cfg, "model.history_len"))
+                a_hist = [float(tau_log[0])] * int(get(cfg, "model.history_len"))
+
+                q_pred = np.zeros((n,), dtype=np.float64)
+                qd_pred = np.zeros((n,), dtype=np.float64)
+                q_pred[0] = float(q_log[0])
+                qd_pred[0] = float(qd_log[0])
+
+                s_mean = stats["s_mean"]
+                s_std = stats["s_std"]
+                a_mean = stats["a_mean"]
+                a_std = stats["a_std"]
+                d_mean = stats["d_mean"]
+                d_std = stats["d_std"]
+
+                for k in range(1, n):
+                    a_hist = a_hist[1:] + [float(tau_log[k])]
+                    feat = state_to_features(np.array(q_hist, dtype=np.float64), np.array(qd_hist, dtype=np.float64)).astype(
+                        np.float32
+                    )
+                    act = np.array(a_hist, dtype=np.float32)[:, None]
+                    feat_n = (feat - s_mean) / s_std
+                    act_n = (act - a_mean) / a_std
+                    x = np.concatenate([feat_n, act_n], axis=-1)[None, :, :]
+                    xb = torch.from_numpy(x).float().to(device)
+                    with torch.no_grad():
+                        pred_norm = model_base(xb)
+                        if model_residual is not None:
+                            pred_norm = pred_norm + model_residual(xb)
+                    delta = pred_norm.detach().cpu().numpy().reshape(-1) * d_std + d_mean
+                    q_next = q_hist[-1] + float(delta[0])
+                    qd_next = qd_hist[-1] + float(delta[1])
+                    q_hist = q_hist[1:] + [q_next]
+                    qd_hist = qd_hist[1:] + [qd_next]
+                    q_pred[k] = q_next
+                    qd_pred[k] = qd_next
+                return q_pred, qd_pred
+
+            q_pred_roll, qd_pred_roll = _rollout_combined(model_real, model_res, stats=stats)
 
             tt = t_log[:n]
             plt.figure(figsize=(12, 7))
@@ -338,7 +403,7 @@ def main() -> None:
             plt.grid(True, alpha=0.3)
             plt.legend()
 
-            out_roll = os.path.join(get(cfg, "paths.runs_dir"), f"eval_{out_prefix}_rollout.png")
+            out_roll = os.path.join(get(cfg, "paths.runs_dir"), f"eval_{out_prefix}_rollout{suffix}.png")
             ensure_dir(os.path.dirname(out_roll) or ".")
             plt.tight_layout()
             plt.savefig(out_roll)

@@ -5,7 +5,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CFG = REPO_ROOT / "config.json"
 
@@ -46,13 +45,6 @@ def do_finetune() -> None:
     _run([py, "scripts/finetune.py", "--config", str(cfg)])
 
 
-def do_eval() -> None:
-    cfg = _input_cfg()
-    model = input("Eval target (sim/real/real_scratch/all) [all]: ").strip() or "all"
-    py = sys.executable
-    _run([py, "scripts/eval.py", "--model", model, "--config", str(cfg)])
-
-
 def do_train_real_scratch() -> None:
     cfg = _input_cfg()
     py = sys.executable
@@ -67,6 +59,17 @@ def do_train_residual() -> None:
     _run([py, "scripts/train_residual.py", "--mode", mode, "--config", str(cfg)])
 
 
+def do_eval() -> None:
+    cfg = _input_cfg()
+    target = input("Eval target (sim/real/real_scratch/all) [all]: ").strip() or "all"
+    res_model = input("Residual model path (optional, default auto-detect): ").strip()
+    py = sys.executable
+    cmd = [py, "scripts/eval.py", "--model", target, "--config", str(cfg)]
+    if res_model:
+        cmd += ["--residual_model", res_model]
+    _run(cmd)
+
+
 def main() -> None:
     menu = {
         "1": ("仿真数据生成 + 预训练", do_sim_and_pretrain),
@@ -79,7 +82,7 @@ def main() -> None:
     }
 
     while True:
-        print("\n=== NERD 1-DOF Guide ===")
+        print("\n=== Dynamics Pipeline Guide ===")
         for k, (label, _) in menu.items():
             print(f"{k}) {label}")
         choice = input("选择操作: ").strip().lower()
