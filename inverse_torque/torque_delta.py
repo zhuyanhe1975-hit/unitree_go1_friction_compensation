@@ -51,11 +51,13 @@ def prepare_torque_delta_dataset(
       tau_out_pred[k] = tau_out[k-1] + delta_tau_out_pred[k]
     """
     ds = dict(np.load(raw_npz, allow_pickle=True))
-    q = np.asarray(ds["q_out"], dtype=np.float64).reshape(-1)
-    qd = np.asarray(ds["qd_out"], dtype=np.float64).reshape(-1)
+    q = np.asarray(ds.get("q_out", ds.get("q", [])), dtype=np.float64).reshape(-1)
+    qd = np.asarray(ds.get("qd_out", ds.get("qd", [])), dtype=np.float64).reshape(-1)
     tau_out = np.asarray(ds.get("tau_out", []), dtype=np.float64).reshape(-1)
     temp = np.asarray(ds.get("temp", []), dtype=np.float64).reshape(-1)
 
+    if q.size == 0 or qd.size == 0:
+        raise KeyError("raw log missing q_out/qd_out (or q/qd) for torque-delta dataset")
     if tau_out.size == 0:
         raise KeyError("raw log missing tau_out for torque-delta dataset")
     if not (q.shape == qd.shape == tau_out.shape):
