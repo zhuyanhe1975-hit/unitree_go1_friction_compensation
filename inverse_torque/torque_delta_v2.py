@@ -68,6 +68,11 @@ def prepare_torque_delta_dataset_v2(
     if q_ref is None or qd_ref is None:
         raise KeyError("raw log missing controller context: need (q_ref, qd_ref) or (e_q, e_qd)")
 
+    stage_id = _get_any(ds, ("stage_id",))
+    if stage_id is None or stage_id.size != q.size:
+        stage_id = np.zeros_like(q, dtype=np.int64)
+    stage_id = stage_id.astype(np.int64).reshape(-1)
+
     if not (q.shape == qd.shape == tau_out.shape == q_ref.shape == qd_ref.shape):
         raise ValueError(
             f"shape mismatch: q={q.shape} qd={qd.shape} q_ref={q_ref.shape} qd_ref={qd_ref.shape} tau_out={tau_out.shape}"
@@ -93,6 +98,11 @@ def prepare_torque_delta_dataset_v2(
     xs = []
     ys = []
     for k in range(H, T):
+        # Avoid mixing samples across capture stages.
+        if stage_id[k - H] != stage_id[k]:
+            continue
+        if not np.all(stage_id[k - H : k + 1] == stage_id[k]):
+            continue
         xs.append(feat_full[k - H : k])  # [H, Din]
         ys.append(delta_tau[k])
 
@@ -130,4 +140,3 @@ def prepare_torque_delta_dataset_v2(
         parent_raw=np.array([raw_npz], dtype=object),
         feature_version=np.array(["v2_state_error_tau"], dtype=object),
     )
-

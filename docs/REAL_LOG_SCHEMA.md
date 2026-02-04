@@ -22,10 +22,19 @@
 - `tau_cmd`：下发力矩指令（Nm），`[T]`（位置闭环模式下可能为 0 或不存在）
 - `temp`：温度（C），`[T]`（可选）
 - `merror`：电机错误码（int/float），`[T]`（可选）
+- `q_ref` / `qd_ref`：位置闭环参考（rad / rad/s），`[T]`（coverage 采集 CSV 转换后会带）
+- `kp` / `kd`：位置环增益（float），`[T]`（coverage 采集 CSV 转换后会带，通常为常数）
+- `stage_id`：采集阶段编号（int），`[T]`（用于切段，避免跨 stage 拼接样本）
 
 补充字段（某些采集脚本会带）：
 - `q_m/q_m_raw`、`qd_m`：电机侧角度/速度（rad/rad/s），`[T]`
 - `tau_out_raw`：SDK 原始 `data.tau` 通道，`[T]`
+
+来源追踪（强烈建议保留）：
+- `parent_csv`：本 `real_log.npz` 由哪个 CSV 转换而来（字符串），形如 `[".../coverage_capture_*.csv"]`
+- `parent_csv_sha256`：CSV 的 SHA256（字符串），用于确保“没搞错来源”
+- `created_at`：转换时间（字符串）
+- `git_head`：转换时仓库 git commit（字符串，可能为空）
 
 ---
 
@@ -64,4 +73,3 @@
 - 目标：`delta_tau_out[k] = tau_out[k] - tau_out[k-1]`
 
 因此部署时“当前测量”对应训练样本里的 `k-1`，模型预测的是下一步 `k` 的增量。
-

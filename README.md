@@ -71,6 +71,23 @@ PYTHONPATH=. python3 scripts/demo_ff_sine.py \
 
 ## 实机采集注意事项（关键）
 
+- 如果你使用覆盖性采集工具（`coverage_capture.py`）生成了 `coverage_capture_*.csv`，建议用本仓库脚本转换为 `runs/real_log.npz`，并写入来源追踪字段（`parent_csv/_sha256` 等），避免训练时搞错 CSV 来源：
+
+```bash
+PYTHONPATH=. python3 scripts/convert_coverage_csv_to_real_log.py \
+  --csv data/coverage_capture_YYYYMMDD_HHMMSS.csv \
+  --out runs/real_log.npz \
+  --kp 2.0 --kd 0.02 \
+  --tau_cmd 0.0 \
+  --force
+```
+
+检查当前 `real_log.npz` 的来源：
+
+```bash
+PYTHONPATH=. python3 scripts/inspect_real_log_source.py --npz runs/real_log.npz
+```
+
 - 采集 chirp 力矩时，请确保 `config.json` 里 `real.kp=0` 且 `real.kd=0`，否则反馈的 `tau_out` 会混入内部位置/速度环的力矩分量，导致 `tau_cmd` 与 `tau_out` 形状差异很大。
 - `config.json` 的 `data.real.action_key` 决定 real 数据集训练/评估用哪一个力矩作为输入：
   - `"tau_cmd"`：下发的力矩指令

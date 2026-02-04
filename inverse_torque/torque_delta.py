@@ -55,6 +55,7 @@ def prepare_torque_delta_dataset(
     qd = np.asarray(ds.get("qd_out", ds.get("qd", [])), dtype=np.float64).reshape(-1)
     tau_out = np.asarray(ds.get("tau_out", []), dtype=np.float64).reshape(-1)
     temp = np.asarray(ds.get("temp", []), dtype=np.float64).reshape(-1)
+    stage_id = np.asarray(ds.get("stage_id", np.zeros_like(q, dtype=np.int64)), dtype=np.int64).reshape(-1)
 
     if q.size == 0 or qd.size == 0:
         raise KeyError("raw log missing q_out/qd_out (or q/qd) for torque-delta dataset")
@@ -62,6 +63,8 @@ def prepare_torque_delta_dataset(
         raise KeyError("raw log missing tau_out for torque-delta dataset")
     if not (q.shape == qd.shape == tau_out.shape):
         raise ValueError(f"q/qd/tau_out shape mismatch: q={q.shape} qd={qd.shape} tau_out={tau_out.shape}")
+    if stage_id.size != q.size:
+        stage_id = np.zeros_like(q, dtype=np.int64)
 
     H = int(get(cfg, "model.history_len"))
     T = int(q.shape[0])
@@ -85,6 +88,11 @@ def prepare_torque_delta_dataset(
     # Predict delta_tau at time k, using history ending at k-1 (length H).
     # Window indices: [k-H, ..., k-1] (inclusive) -> length H
     for k in range(H, T):
+        # Do not stitch across stage boundaries (e.g., return-to-zero / step changes).
+        if stage_id[k - H] != stage_id[k]:
+            continue
+        if not np.all(stage_id[k - H : k + 1] == stage_id[k]):
+            continue
         x_win = feat_full[k - H : k]  # [H, Din], last row corresponds to (k-1)
         y_k = delta_tau[k]  # [1], delta from (k-1)->k
         xs.append(x_win)

@@ -98,6 +98,7 @@ PYTHONPATH=. python3 scripts/summarize_ff_demo_batch.py \
 - [x] `e_q = q_ref - q`
 - [x] `e_qd = qd_ref - qd`
 - [x] 把 `runs/real_log.npz` 的字段/含义集中写在一个文档里（见 `docs/REAL_LOG_SCHEMA.md`）。
+- [x] 覆盖性采集链路（长期来源）：支持 `coverage_capture_*.csv -> runs/real_log.npz` 的转换，并在 `real_log.npz` 内写入来源追踪字段（`parent_csv/_sha256` 等），避免搞错数据来源。
 
 验收标准：
 - 新的 `real_log` 包含足够信息，可训练：
