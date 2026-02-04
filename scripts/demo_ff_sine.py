@@ -295,7 +295,26 @@ def _run_trial(
     if torque_delta is not None:
         torque_delta.reset()
 
-    logs: dict[str, list[float]] = {k: [] for k in ["t", "q", "qd", "q_ref", "qd_ref", "e_q", "tau_ff", "tau_out", "temp", "merror", "loop_dt"]}
+    logs: dict[str, list[float]] = {
+        k: []
+        for k in [
+            "t",
+            "q",
+            "qd",
+            "q_ref",
+            "qd_ref",
+            "e_q",
+            "e_qd",
+            "kp",
+            "kd",
+            "tau_cmd_ff",
+            "tau_ff",
+            "tau_out",
+            "temp",
+            "merror",
+            "loop_dt",
+        ]
+    }
 
     tau_ff_prev = 0.0
     start = time.perf_counter()
@@ -364,6 +383,10 @@ def _run_trial(
             logs["q_ref"].append(float(q_ref))
             logs["qd_ref"].append(float(dq_ref))
             logs["e_q"].append(float(q_ref - q))
+            logs["e_qd"].append(float(dq_ref - qd))
+            logs["kp"].append(float(kp))
+            logs["kd"].append(float(kd))
+            logs["tau_cmd_ff"].append(float(tau_ff))
             logs["tau_ff"].append(float(tau_ff))
             logs["tau_out"].append(float(tau_out))
             logs["temp"].append(float(temp))
@@ -386,7 +409,27 @@ def _run_trial(
     finally:
         signal.signal(signal.SIGINT, old)
 
-    np.savez(out_npz, **{k: np.asarray(v, dtype=np.float64) for k, v in logs.items()})
+    out = {k: np.asarray(v, dtype=np.float64) for k, v in logs.items()}
+
+    # Derived signals from q/t for analysis: qd_from_q, qdd_from_q.
+    t_arr = out["t"].reshape(-1)
+    q_arr = out["q"].reshape(-1)
+    if len(t_arr) >= 2:
+        dt_arr = np.diff(t_arr)
+        # Avoid division by 0 in rare cases; fallback to configured dt.
+        dt_safe = np.where(dt_arr > 1e-9, dt_arr, float(dt))
+        qd_from_q = np.zeros_like(q_arr)
+        qd_from_q[1:] = (q_arr[1:] - q_arr[:-1]) / dt_safe
+        qdd_from_q = np.zeros_like(q_arr)
+        qdd_from_q[1:] = (qd_from_q[1:] - qd_from_q[:-1]) / dt_safe
+    else:
+        qd_from_q = np.zeros_like(q_arr)
+        qdd_from_q = np.zeros_like(q_arr)
+
+    out["qd_from_q"] = qd_from_q.astype(np.float64)
+    out["qdd_from_q"] = qdd_from_q.astype(np.float64)
+
+    np.savez(out_npz, **out)
 
 
 def _metrics(path: str) -> dict[str, float]:

@@ -62,10 +62,10 @@ PYTHONPATH=. python3 scripts/demo_ff_sine.py \
 ---
 
 ## Phase 1 — 评估工具链（让进展可量化）
-- [ ] 增加一个离线评估脚本：回放 `ff_demo_*.npz`，对多次实验输出一张汇总表。
-- [ ] 增加一个“分段指标”报告，专注低速换向段：
-- [ ] 用 `qd` 自动检测换向区间，只在这些区间统计误差指标。
-- [ ] 每一批实验产出一个 `runs/summary_*.md`（不强制截图）。
+- [x] 增加一个离线评估脚本：回放 `ff_demo_*.npz`，对多次实验输出一张汇总表。
+- [x] 增加一个“分段指标”报告，专注低速换向段：
+- [x] 用 `qd` 自动检测换向区间，只在这些区间统计误差指标。
+- [x] 每一批实验产出一个 `runs/summary_*.md`（不强制截图）。
 
 验收标准：
 - 一条命令可以生成 markdown 汇总，对比多组实验结果。
@@ -89,15 +89,15 @@ PYTHONPATH=. python3 scripts/summarize_ff_demo_batch.py \
 ## Phase 2 — 更好的实机日志（补齐“控制器上下文”）
 目标：让模型“看见”位置环到底想让系统做什么。
 
-- [ ] 扩展 `scripts/demo_ff_sine.py` 的日志字段，至少包含：
-- [ ] `kp`、`kd`（逐步记录）
-- [ ] `tau_cmd_ff`（实际下发的前馈力矩）
-- [ ] `qd_from_q`（由 q 和 dt 差分得到）
-- [ ] 可选：`qdd_from_q`（轻度滤波后差分）
-- [ ] 日志中已有 `q_ref`、`qd_ref`，并额外计算/存储：
-- [ ] `e_q = q_ref - q`
-- [ ] `e_qd = qd_ref - qd`
-- [ ] 把 `runs/real_log.npz` 的字段/含义集中写在一个文档里。
+- [x] 扩展 `scripts/demo_ff_sine.py` 的日志字段，至少包含：
+- [x] `kp`、`kd`（逐步记录）
+- [x] `tau_cmd_ff`（实际下发的前馈力矩）
+- [x] `qd_from_q`（由 q 和 dt 差分得到）
+- [x] 可选：`qdd_from_q`（轻度滤波后差分）
+- [x] 日志中已有 `q_ref`、`qd_ref`，并额外计算/存储：
+- [x] `e_q = q_ref - q`
+- [x] `e_qd = qd_ref - qd`
+- [x] 把 `runs/real_log.npz` 的字段/含义集中写在一个文档里（见 `docs/REAL_LOG_SCHEMA.md`）。
 
 验收标准：
 - 新的 `real_log` 包含足够信息，可训练：
