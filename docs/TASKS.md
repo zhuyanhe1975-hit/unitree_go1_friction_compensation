@@ -70,6 +70,20 @@ PYTHONPATH=. python3 scripts/demo_ff_sine.py \
 验收标准：
 - 一条命令可以生成 markdown 汇总，对比多组实验结果。
 
+### Phase 1 执行方式（已提供脚本）
+
+已添加脚本：`scripts/summarize_ff_demo_batch.py`
+
+示例（汇总某一批报告）：
+
+```bash
+PYTHONPATH=. python3 scripts/summarize_ff_demo_batch.py \
+  --glob 'runs/ff_demo_report_*.md' \
+  --window_s 0.5
+```
+
+输出示例：`runs/summary_ff_demo_*.md`（包含全程指标 + 换向窗口指标 + loop_dt 统计）
+
 ---
 
 ## Phase 2 — 更好的实机日志（补齐“控制器上下文”）
