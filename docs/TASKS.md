@@ -102,22 +102,22 @@ PYTHONPATH=. python3 scripts/summarize_ff_demo_batch.py \
 验收标准：
 - 新的 `real_log` 包含足够信息，可训练：
 - [ ] 纯状态驱动模型（dynamics-ish），或
-- [ ] 控制器感知模型（基于 ref/error）。
+- [x] 控制器感知模型（基于 ref/error；已用 `runs/ff_demo_baseline_*.npz` 训练通过）。
 
 ---
 
 ## Phase 3 — Torque-Delta 模型 v2（特征升级）
 目标：在“部署的真实工况”（位置闭环）下提升可预测性。
 
-- [ ] 新建一份数据集版本（不破坏现有 v1）：
-- [ ] 输出：`runs/torque_delta_dataset_v2.npz`
-- [ ] 每步输入特征（建议）：
-- [ ] `sin(q)`、`cos(q)`、`qd`
-- [ ] `q_ref`、`qd_ref`（或 `e_q`、`e_qd`）
-- [ ] `tau_out`（只用到 k-1 的历史，避免泄漏）
-- [ ] 可选：`temp`
-- [ ] 目标保持一致：`delta_tau_out[k]`
-- [ ] 更新 `scripts/demo_ff_sine.py`：支持选择使用 v1 还是 v2 的模型/数据集。
+- [x] 新建一份数据集版本（不破坏现有 v1）：
+- [x] 输出：`runs/torque_delta_dataset_v2.npz`
+- [x] 每步输入特征（v2 采用 error 版）：
+- [x] `sin(q)`、`cos(q)`、`qd`
+- [x] `e_q`、`e_qd`（由 `q_ref/qd_ref` 或日志中的 `e_q/e_qd` 推导）
+- [x] `tau_out`（只用到 k-1 的历史，避免泄漏）
+- [x] 可选：`temp`
+- [x] 目标保持一致：`delta_tau_out[k]`
+- [x] 更新 `scripts/demo_ff_sine.py`：自动支持 v1/v2（根据数据集输入维度推断）。
 
 验收标准：
 - v2 在标准低速轨迹上优于 v1，且不会引入明显的实时性问题。
