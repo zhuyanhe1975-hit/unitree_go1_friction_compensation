@@ -163,6 +163,9 @@ def main() -> int:
         qd_out=qd_out,
         tau_out=tau_out,
         tau_cmd=tau_cmd_arr,
+        # Compatibility aliases (some older pipelines log motor-side keys)
+        q_m=q_out,
+        qd_m=qd_out,
         # Controller context (for v2)
         q_ref=q_ref_arr,
         qd_ref=qd_ref_arr,
