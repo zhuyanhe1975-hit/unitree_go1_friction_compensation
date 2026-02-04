@@ -9,14 +9,55 @@
 ---
 
 ## Phase 0 — 基线冻结（现在）
-- [ ] 用一个小表格记录当前“已知好用”的 demo 默认参数（amp/freq/kp/kd/limit/scale/update_div）。
-- [ ] 定义我们每次都要输出的成功指标：
-- [ ] `rmse_e_q`、`maxabs_e_q`、`meanabs_tau_out`、`meanabs_tau_ff`、`loop_dt_median`、`loop_dt_p90`
-- [ ] 定义 1 条标准轨迹（低速）+ 1 条压力轨迹（较高速）用于回归测试。
+- [x] 用一个小表格记录当前“已知好用”的 demo 默认参数（amp/freq/kp/kd/limit/scale/update_div）。
+- [x] 定义我们每次都要输出的成功指标：
+- [x] `rmse_e_q`、`maxabs_e_q`、`meanabs_tau_out`、`meanabs_tau_ff`、`loop_dt_median`、`loop_dt_p90`
+- [x] 定义 1 条标准轨迹（低速）+ 1 条压力轨迹（较高速）用于回归测试。
 
 交付物：
 - 在本文档中固定一条“黄金命令”（golden run）。
 - 给出回归门槛：例如“新模型不能让 baseline 指标恶化超过 X%”。
+
+### Phase 0 产物（已完成）
+
+已知好用参数（来自 2026-02-04 的实机 demo 结果，`ff_type=torque_delta`）：
+
+| 场景 | 轨迹 (amp,freq,dur,dt) | kp/kd | FF(limit,scale,div) | baseline (rmse/max) | ff (rmse/max) | 备注 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 标准（低频低速，偏软反馈） | 0.2, 0.1, 20, 0.01 | 1 / 0.01 | 0.15, 1, 1 | 0.033862 / 0.063797 | 0.009577 / 0.034417 | `runs/ff_demo_report_20260204_155343.md` |
+| 低速（较高频，偏软反馈） | 0.2, 0.2, 20, 0.01 | 1 / 0.01 | 0.15, 1, 1 | 0.035657 / 0.062428 | 0.011010 / 0.038489 | `runs/ff_demo_report_20260204_154740.md` |
+| 低速（偏硬反馈） | 0.2, 0.2, 20, 0.01 | 5 / 0.05 | 0.15, 1, 1 | 0.009029 / 0.016698 | 0.004603 / 0.011644 | `runs/ff_demo_report_20260204_154347.md` |
+| 压力（更高频） | 0.2, 0.5, 20, 0.01 | 1 / 0.01 | 0.15, 1, 1 | 0.038112 / (n/a) | 0.016497 / (n/a) | `runs/ff_demo_report_20260204_155218.md` |
+
+黄金命令（标准轨迹，建议作为回归基线）：
+
+```bash
+# 位置闭环 + torque-delta 前馈（标准轨迹）
+PYTHONPATH=. python3 scripts/demo_ff_sine.py \
+  --mode both \
+  --ff_type torque_delta \
+  --amp 0.2 --freq 0.1 --duration 20 \
+  --kp 1 --kd 0.01 \
+  --tau_ff_limit 0.15 --tau_ff_scale 1 \
+  --ff_update_div 1
+```
+
+压力轨迹（用于验证更高频/更高速度时是否会退化）：
+
+```bash
+# 位置闭环 + torque-delta 前馈（压力轨迹）
+PYTHONPATH=. python3 scripts/demo_ff_sine.py \
+  --mode both \
+  --ff_type torque_delta \
+  --amp 0.2 --freq 0.5 --duration 20 \
+  --kp 1 --kd 0.01 \
+  --tau_ff_limit 0.15 --tau_ff_scale 1 \
+  --ff_update_div 1
+```
+
+回归门槛（建议，后续可根据数据再收紧）：
+- 标准轨迹：`ff.rmse_e_q` 不得劣化超过 10%，且 `loop_dt_p90 <= 0.012s`
+- 压力轨迹：`ff.rmse_e_q` 不得劣化超过 15%，且 `loop_dt_p90 <= 0.012s`
 
 ---
 
