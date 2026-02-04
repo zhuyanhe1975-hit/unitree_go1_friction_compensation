@@ -33,11 +33,56 @@ def _compute_stats(x: np.ndarray, y: np.ndarray) -> Dict[str, np.ndarray]:
     return {"x_mean": x_mean, "x_std": x_std, "y_mean": y_mean, "y_std": y_std}
 
 
+def _lpf_1pole(x: np.ndarray, fc_hz: float, dt: float) -> np.ndarray:
+    """
+    1st-order IIR low-pass filter (causal):
+      y[n] = a*y[n-1] + (1-a)*x[n]
+    where a = exp(-2*pi*fc*dt).
+    """
+    x = np.asarray(x, dtype=np.float64).reshape(-1)
+    if x.size == 0:
+        return x.copy()
+    if not (fc_hz > 0.0) or not (dt > 0.0):
+        return x.copy()
+    a = float(np.exp(-2.0 * np.pi * float(fc_hz) * float(dt)))
+    y = np.empty_like(x)
+    y[0] = x[0]
+    for i in range(1, x.size):
+        y[i] = a * y[i - 1] + (1.0 - a) * x[i]
+    return y
+
+
+def _lpf_1pole_zero_phase(x: np.ndarray, fc_hz: float, dt: float) -> np.ndarray:
+    """Forward-backward (zero-phase) variant of _lpf_1pole."""
+    y = _lpf_1pole(x, fc_hz=fc_hz, dt=dt)
+    y = _lpf_1pole(y[::-1], fc_hz=fc_hz, dt=dt)[::-1]
+    return y
+
+
+def _apply_by_stage(x: np.ndarray, stage_id: np.ndarray, fn) -> np.ndarray:
+    """Apply a function within each contiguous stage segment only."""
+    x = np.asarray(x, dtype=np.float64).reshape(-1)
+    stage_id = np.asarray(stage_id, dtype=np.int64).reshape(-1)
+    if x.size == 0 or stage_id.size != x.size:
+        return x.copy()
+    out = x.copy()
+    s = 0
+    for i in range(1, x.size + 1):
+        if i == x.size or stage_id[i] != stage_id[s]:
+            out[s:i] = fn(x[s:i])
+            s = i
+    return out
+
+
 def prepare_torque_delta_dataset(
     cfg: Dict[str, Any],
     raw_npz: str,
     out_npz: str,
     stats_npz: str | None = None,
+    *,
+    tau_lpf_hz: float | None = None,
+    qd_lpf_hz: float | None = None,
+    zero_phase: bool = True,
 ) -> None:
     """
     Torque-delta prediction dataset (inverse-dynamics flavored, but autoregressive on measured torque):
@@ -56,6 +101,7 @@ def prepare_torque_delta_dataset(
     tau_out = np.asarray(ds.get("tau_out", []), dtype=np.float64).reshape(-1)
     temp = np.asarray(ds.get("temp", []), dtype=np.float64).reshape(-1)
     stage_id = np.asarray(ds.get("stage_id", np.zeros_like(q, dtype=np.int64)), dtype=np.int64).reshape(-1)
+    t = np.asarray(ds.get("t", ds.get("time", [])), dtype=np.float64).reshape(-1)
 
     if q.size == 0 or qd.size == 0:
         raise KeyError("raw log missing q_out/qd_out (or q/qd) for torque-delta dataset")
@@ -70,6 +116,23 @@ def prepare_torque_delta_dataset(
     T = int(q.shape[0])
     if T < H + 1:
         raise ValueError("trajectory too short for history_len")
+
+    # Optional smoothing (training-time only). Prefer zero-phase offline to remove noise,
+    # but NEVER use it online. Always apply within each stage to avoid boundary artifacts.
+    if t.size >= 3:
+        dt = float(np.median(np.diff(t)))
+    else:
+        dt = float(get(cfg, "real.dt", required=False, default=0.01))
+
+    def _make_filter(fc: float):
+        if zero_phase:
+            return lambda z: _lpf_1pole_zero_phase(z, fc_hz=fc, dt=dt)
+        return lambda z: _lpf_1pole(z, fc_hz=fc, dt=dt)
+
+    if qd_lpf_hz is not None and float(qd_lpf_hz) > 0.0:
+        qd = _apply_by_stage(qd, stage_id, _make_filter(float(qd_lpf_hz)))
+    if tau_lpf_hz is not None and float(tau_lpf_hz) > 0.0:
+        tau_out = _apply_by_stage(tau_out, stage_id, _make_filter(float(tau_lpf_hz)))
 
     feat_state = state_to_features(q, qd).astype(np.float32)  # [T, 3]
     tau_col = tau_out.astype(np.float32).reshape(-1, 1)

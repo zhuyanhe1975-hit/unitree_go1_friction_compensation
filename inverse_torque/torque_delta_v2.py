@@ -6,6 +6,7 @@ from typing import Any, Dict
 import numpy as np
 
 from pipeline.features import state_error_to_features
+from inverse_torque.torque_delta import _apply_by_stage, _lpf_1pole, _lpf_1pole_zero_phase
 from project_config import ensure_dir, get
 
 
@@ -29,6 +30,10 @@ def prepare_torque_delta_dataset_v2(
     raw_npz: str,
     out_npz: str,
     stats_npz: str | None = None,
+    *,
+    tau_lpf_hz: float | None = None,
+    qd_lpf_hz: float | None = None,
+    zero_phase: bool = True,
 ) -> None:
     """
     Torque-delta dataset v2: add controller context for position-loop conditions.
@@ -51,6 +56,7 @@ def prepare_torque_delta_dataset_v2(
     qd = _get_any(ds, ("qd_out", "qd"))
     tau_out = _get_any(ds, ("tau_out",))
     temp = _get_any(ds, ("temp",))
+    t = _get_any(ds, ("t", "time"))
 
     if q is None or qd is None or tau_out is None:
         raise KeyError("raw log missing required keys: q(_out), qd(_out), tau_out")
@@ -82,6 +88,22 @@ def prepare_torque_delta_dataset_v2(
     T = int(q.shape[0])
     if T < H + 1:
         raise ValueError("trajectory too short for history_len")
+
+    # Optional smoothing (training-time only). Apply within stages to avoid boundary artifacts.
+    if t is not None and t.size >= 3:
+        dt = float(np.median(np.diff(t)))
+    else:
+        dt = float(get(cfg, "real.dt", required=False, default=0.01))
+
+    def _make_filter(fc: float):
+        if zero_phase:
+            return lambda z: _lpf_1pole_zero_phase(z, fc_hz=fc, dt=dt)
+        return lambda z: _lpf_1pole(z, fc_hz=fc, dt=dt)
+
+    if qd_lpf_hz is not None and float(qd_lpf_hz) > 0.0:
+        qd = _apply_by_stage(qd, stage_id, _make_filter(float(qd_lpf_hz)))
+    if tau_lpf_hz is not None and float(tau_lpf_hz) > 0.0:
+        tau_out = _apply_by_stage(tau_out, stage_id, _make_filter(float(tau_lpf_hz)))
 
     feat_state = state_error_to_features(q, qd, q_ref, qd_ref).astype(np.float32)  # [T, 5]
     tau_col = tau_out.astype(np.float32).reshape(-1, 1)

@@ -13,6 +13,9 @@ def main() -> None:
     ap.add_argument("--raw", default=None, help="raw log npz (default: paths.real_log)")
     ap.add_argument("--out", default=None, help="output torque dataset npz")
     ap.add_argument("--stats", default=None, help="output stats npz (optional)")
+    ap.add_argument("--tau_lpf_hz", type=float, default=0.0, help="optional tau_out low-pass cutoff (Hz); 0 disables")
+    ap.add_argument("--qd_lpf_hz", type=float, default=0.0, help="optional qd low-pass cutoff (Hz); 0 disables")
+    ap.add_argument("--causal", action="store_true", help="use causal (non-zero-phase) filtering if LPF enabled")
     args = ap.parse_args()
 
     cfg = load_cfg(args.config)
@@ -32,7 +35,15 @@ def main() -> None:
     except Exception:
         pass
 
-    prepare_torque_delta_dataset(cfg, raw_npz=raw, out_npz=out, stats_npz=stats)
+    prepare_torque_delta_dataset(
+        cfg,
+        raw_npz=raw,
+        out_npz=out,
+        stats_npz=stats,
+        tau_lpf_hz=(float(args.tau_lpf_hz) if float(args.tau_lpf_hz) > 0.0 else None),
+        qd_lpf_hz=(float(args.qd_lpf_hz) if float(args.qd_lpf_hz) > 0.0 else None),
+        zero_phase=(not bool(args.causal)),
+    )
     print(f"saved torque-delta dataset: {out}")
     if stats:
         print(f"saved torque-delta stats: {stats}")

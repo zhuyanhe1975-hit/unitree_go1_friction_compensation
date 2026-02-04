@@ -128,6 +128,10 @@ PYTHONPATH=. python3 scripts/summarize_ff_demo_batch.py \
 ## Phase 4 — 训练改进（降低增量学习的噪声）
 - [ ] 增加“先平滑再差分”的可选项：
 - [ ] 对 `tau_out` 先低通，再计算 `delta_tau_out`
+- [ ] 对 `qd` 做同样低通（减少速度量化/抖动被模型误学）
+- [ ] 实现方式（已支持开关，默认关闭）：`inverse_torque/prepare.py`、`inverse_torque/prepare_v2.py`
+- [ ] 示例（离线零相位，推荐先试 10–20Hz）：`--tau_lpf_hz 15 --qd_lpf_hz 15`
+- [ ] 注意：零相位滤波只能用于离线训练；在线部署若要一致，可用 `--causal` 训练一个“因果一致”的版本对照。
 - [ ] 增加鲁棒损失函数可选项：
 - [ ] Huber loss（或 clipped MSE），降低对力矩量化尖峰的敏感性
 - [ ] 对“摩擦关键区域”做样本加权：
