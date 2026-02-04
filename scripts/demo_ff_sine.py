@@ -198,10 +198,11 @@ class TorqueDeltaPredictor:
     def __init__(self, model_path: str, dataset_npz: str, device: str = "cpu"):
         import torch
         from pipeline.model import CausalTransformer
-        from pipeline.features import state_to_features
+        from pipeline.features import state_error_to_features, state_to_features
 
         self._torch = torch
         self._state_to_features = state_to_features
+        self._state_error_to_features = state_error_to_features
 
         ds = dict(np.load(dataset_npz, allow_pickle=True))
         self.x_mean = ds["x_mean"].astype(np.float32)
@@ -236,15 +237,55 @@ class TorqueDeltaPredictor:
     def reset(self) -> None:
         self.buf.clear()
 
-    def update_and_predict(self, q: float, qd: float, tau_out: float, temp: float | None = None) -> float | None:
-        feat = self._state_to_features(np.array([q], dtype=np.float64), np.array([qd], dtype=np.float64)).astype(np.float32).reshape(-1)
-        # Torque-delta dataset always appends tau_out as the last channel; temp may optionally exist.
-        if self.D == 5:
-            if temp is None:
-                temp = 0.0
-            feat = np.concatenate([feat, np.array([float(temp)], dtype=np.float32), np.array([float(tau_out)], dtype=np.float32)], axis=0)
+    def update_and_predict(
+        self,
+        q: float,
+        qd: float,
+        tau_out: float,
+        temp: float | None = None,
+        q_ref: float | None = None,
+        qd_ref: float | None = None,
+    ) -> float | None:
+        """
+        For v1 datasets:
+          D=4: [sin, cos, qd, tau_out]
+          D=5: [sin, cos, qd, temp, tau_out]
+        For v2 datasets:
+          D=6: [sin, cos, qd, e_q, e_qd, tau_out]
+          D=7: [sin, cos, qd, e_q, e_qd, temp, tau_out]
+        """
+        if self.D in (6, 7):
+            if q_ref is None or qd_ref is None:
+                raise ValueError("torque-delta v2 requires q_ref and qd_ref for controller-context features")
+            feat = (
+                self._state_error_to_features(
+                    np.array([q], dtype=np.float64),
+                    np.array([qd], dtype=np.float64),
+                    np.array([q_ref], dtype=np.float64),
+                    np.array([qd_ref], dtype=np.float64),
+                )
+                .astype(np.float32)
+                .reshape(-1)
+            )
+            if self.D == 7:
+                if temp is None:
+                    temp = 0.0
+                feat = np.concatenate(
+                    [feat, np.array([float(temp)], dtype=np.float32), np.array([float(tau_out)], dtype=np.float32)], axis=0
+                )
+            else:
+                feat = np.concatenate([feat, np.array([float(tau_out)], dtype=np.float32)], axis=0)
         else:
-            feat = np.concatenate([feat, np.array([float(tau_out)], dtype=np.float32)], axis=0)
+            feat = self._state_to_features(np.array([q], dtype=np.float64), np.array([qd], dtype=np.float64)).astype(np.float32).reshape(-1)
+            # Torque-delta dataset always appends tau_out as the last channel; temp may optionally exist.
+            if self.D == 5:
+                if temp is None:
+                    temp = 0.0
+                feat = np.concatenate(
+                    [feat, np.array([float(temp)], dtype=np.float32), np.array([float(tau_out)], dtype=np.float32)], axis=0
+                )
+            else:
+                feat = np.concatenate([feat, np.array([float(tau_out)], dtype=np.float32)], axis=0)
 
         self.buf.append(feat.astype(np.float32))
         if len(self.buf) < self.buf.maxlen:
@@ -358,7 +399,7 @@ def _run_trial(
                     tau_ff = float(tau_ff_prev)
             elif mode == "ff" and torque_delta is not None:
                 if ff_update_div <= 1 or (len(logs["t"]) % ff_update_div == 0):
-                    delta = torque_delta.update_and_predict(q=q, qd=qd, tau_out=tau_out, temp=temp)
+                    delta = torque_delta.update_and_predict(q=q, qd=qd, tau_out=tau_out, temp=temp, q_ref=q_ref, qd_ref=dq_ref)
                     if delta is not None:
                         # User-requested construction: tau_ff[k] = tau_out[k-1] + delta_tau_out_pred[k]
                         # Here we approximate tau_out[k-1] with the latest measured tau_out (since we update before send).
