@@ -92,14 +92,80 @@ def _load_npz(path: str) -> dict[str, np.ndarray]:
     return {k: v for k, v in dict(np.load(path, allow_pickle=True)).items()}
 
 
-def _find_reversals_by_qd_ref(ds: dict[str, np.ndarray]) -> np.ndarray:
-    qd_ref = np.asarray(ds.get("qd_ref", []), dtype=np.float64).reshape(-1)
-    if qd_ref.size < 3:
+def _zero_crossings(x: np.ndarray) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float64).reshape(-1)
+    if x.size < 3:
         return np.array([], dtype=np.int64)
-    zc = np.where(qd_ref[:-1] * qd_ref[1:] <= 0)[0] + 1
-    # remove edges
-    zc = zc[(zc > 1) & (zc < len(qd_ref) - 2)]
+    zc = np.where(x[:-1] * x[1:] <= 0)[0] + 1
+    zc = zc[(zc > 1) & (zc < len(x) - 2)]
     return zc.astype(np.int64)
+
+
+def _pick_reversal_signal(ds: dict[str, np.ndarray], choice: str) -> tuple[str | None, np.ndarray]:
+    """Pick a velocity-like signal for alignment (or seeds if qd_ref missing)."""
+    if choice == "qd_from_q":
+        return ("qd_from_q", np.asarray(ds.get("qd_from_q", []), dtype=np.float64).reshape(-1))
+    if choice == "qd":
+        return ("qd", np.asarray(ds.get("qd", []), dtype=np.float64).reshape(-1))
+    if choice == "qd_ref":
+        return ("qd_ref", np.asarray(ds.get("qd_ref", []), dtype=np.float64).reshape(-1))
+    # auto: prefer qd_from_q -> qd -> qd_ref
+    for k in ("qd_from_q", "qd", "qd_ref"):
+        x = np.asarray(ds.get(k, []), dtype=np.float64).reshape(-1)
+        if x.size:
+            return (k, x)
+    return (None, np.array([], dtype=np.float64))
+
+
+def _find_reversals(
+    ds: dict[str, np.ndarray],
+    *,
+    dt: float,
+    reversal_signal: str,
+    align_s: float,
+) -> tuple[np.ndarray, dict[str, str]]:
+    """
+    Find reversal centers (velocity ~= 0 moments).
+
+    Strategy:
+    - Prefer using `qd_ref` as stable seeds when available.
+    - Optionally align each seed to the nearest |qd_x| minimum in a local neighborhood,
+      where qd_x is chosen by `reversal_signal` (auto: qd_from_q -> qd -> qd_ref).
+    """
+    meta: dict[str, str] = {}
+
+    qd_ref = np.asarray(ds.get("qd_ref", []), dtype=np.float64).reshape(-1)
+    seed = _zero_crossings(qd_ref) if qd_ref.size else np.array([], dtype=np.int64)
+    if seed.size:
+        meta["seed"] = "qd_ref"
+    else:
+        meta["seed"] = "fallback"
+
+    k_align, qd_align = _pick_reversal_signal(ds, reversal_signal)
+    if k_align is None or qd_align.size == 0:
+        meta["align"] = "none"
+        return (seed, meta)
+    meta["align"] = k_align
+
+    if seed.size == 0:
+        # No qd_ref: use chosen signal directly for zero crossings.
+        return (_zero_crossings(qd_align), meta)
+
+    if align_s <= 0:
+        return (seed, meta)
+
+    rad = int(max(1, round(float(align_s) / max(1e-9, float(dt)))))
+    centers: list[int] = []
+    for c in seed:
+        s = max(0, int(c) - rad)
+        t = min(qd_align.size, int(c) + rad + 1)
+        if t - s < 5:
+            continue
+        local = np.abs(qd_align[s:t])
+        centers.append(int(s + int(np.argmin(local))))
+    if not centers:
+        return (seed, meta)
+    return (np.asarray(centers, dtype=np.int64), meta)
 
 
 def _window_metrics(ds: dict[str, np.ndarray], centers: np.ndarray, half_window: int) -> dict[str, float]:
@@ -152,7 +218,7 @@ def _window_metrics(ds: dict[str, np.ndarray], centers: np.ndarray, half_window:
     }
 
 
-def _trial_summary(tr: Trial, window_s: float) -> dict[str, Any] | None:
+def _trial_summary(tr: Trial, window_s: float, *, reversal_signal: str, align_s: float) -> dict[str, Any] | None:
     if not (os.path.exists(tr.baseline_npz) and os.path.exists(tr.ff_npz)):
         return None
 
@@ -168,7 +234,7 @@ def _trial_summary(tr: Trial, window_s: float) -> dict[str, Any] | None:
 
     half_window = int(max(1, round(float(window_s) / dt)))
 
-    centers = _find_reversals_by_qd_ref(b)
+    centers, rev_meta = _find_reversals(b, dt=dt, reversal_signal=reversal_signal, align_s=align_s)
     centers = centers[(centers > half_window) & (centers < len(tb) - half_window - 1)]
 
     b_e = np.asarray(b.get("e_q", []), dtype=np.float64).reshape(-1)
@@ -190,6 +256,8 @@ def _trial_summary(tr: Trial, window_s: float) -> dict[str, Any] | None:
         "dt_med": dt,
         "window_s": float(window_s),
         "n_rev": int(b_rev["n_rev"]),
+        "rev_seed": str(rev_meta.get("seed", "n/a")),
+        "rev_align": str(rev_meta.get("align", "n/a")),
         # Global metrics
         "b_rmse": _rmse(b_e),
         "f_rmse": _rmse(f_e),
@@ -225,6 +293,18 @@ def main() -> None:
     ap.add_argument("--glob", default="runs/ff_demo_report_*.md", help="glob for demo report markdown files")
     ap.add_argument("--out", default=None, help="output markdown path (default: runs/summary_ff_demo_<stamp>.md)")
     ap.add_argument("--window_s", type=float, default=0.5, help="half-window around each reversal (seconds)")
+    ap.add_argument(
+        "--reversal_signal",
+        default="auto",
+        choices=["auto", "qd_from_q", "qd", "qd_ref"],
+        help="signal used to align reversal centers (default: auto; prefer qd_from_q -> qd -> qd_ref)",
+    )
+    ap.add_argument(
+        "--align_s",
+        type=float,
+        default=0.25,
+        help="if qd_ref exists, align each qd_ref zero-crossing to nearest |qd_x| minimum within +/- align_s seconds (0 disables)",
+    )
     ap.add_argument("--only_ff_type", default="torque_delta", help="only include reports with ff_type=... (default: torque_delta)")
     args = ap.parse_args()
 
@@ -240,7 +320,7 @@ def main() -> None:
 
     rows: list[dict[str, Any]] = []
     for tr in trials:
-        s = _trial_summary(tr, window_s=float(args.window_s))
+        s = _trial_summary(tr, window_s=float(args.window_s), reversal_signal=str(args.reversal_signal), align_s=float(args.align_s))
         if s is not None:
             rows.append(s)
 
@@ -254,6 +334,7 @@ def main() -> None:
     lines.append(f"- 输入 glob: `{args.glob}`")
     lines.append(f"- 过滤 ff_type: `{args.only_ff_type}`")
     lines.append(f"- 换向窗口半宽: {args.window_s:g}s")
+    lines.append(f"- 换向检测: seed=`qd_ref`(若存在) + align=`{args.reversal_signal}`(±{args.align_s:g}s)")
     lines.append("")
     lines.append(f"共收集到 {len(rows)} 组可解析实验。")
     lines.append("")
@@ -276,13 +357,13 @@ def main() -> None:
     lines.append("## 总览表（按 RMSE 改善排序）")
     lines.append("")
     lines.append(
-        "| report | amp | freq | kp | kd | limit | scale | div | rmse(b→ff) | max(b→ff) | rmse_rev(b→ff) | loop_p90(b/ff) |"
+        "| report | amp | freq | kp | kd | limit | scale | div | rev(seed/align) | rmse(b→ff) | max(b→ff) | rmse_rev(b→ff) | loop_p90(b/ff) |"
     )
-    lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 
     for r in rows:
         lines.append(
-            "| {report} | {amp:g} | {freq:g} | {kp:g} | {kd:g} | {lim:g} | {scale:g} | {div} | {b_rmse}->{f_rmse} | {b_max}->{f_max} | {b_rmse_rev}->{f_rmse_rev} | {b_loop}/{f_loop} |".format(
+            "| {report} | {amp:g} | {freq:g} | {kp:g} | {kd:g} | {lim:g} | {scale:g} | {div} | {rev} | {b_rmse}->{f_rmse} | {b_max}->{f_max} | {b_rmse_rev}->{f_rmse_rev} | {b_loop}/{f_loop} |".format(
                 report=r.get("report", ""),
                 amp=float(r.get("amp", float("nan"))),
                 freq=float(r.get("freq", float("nan"))),
@@ -291,6 +372,7 @@ def main() -> None:
                 lim=float(r.get("tau_ff_limit", float("nan"))),
                 scale=float(r.get("tau_ff_scale", float("nan"))),
                 div=int(r.get("ff_update_div", 0)),
+                rev=f"{r.get('rev_seed','n/a')}/{r.get('rev_align','n/a')}",
                 b_rmse=_fmt(float(r.get("b_rmse", float("nan"))), 6),
                 f_rmse=_fmt(float(r.get("f_rmse", float("nan"))), 6),
                 b_max=_fmt(float(r.get("b_max", float("nan"))), 6),
@@ -306,7 +388,9 @@ def main() -> None:
     lines.append("## 指标说明")
     lines.append("")
     lines.append("- `rmse/max`：全程 `e_q` 的 RMSE / 最大绝对值")
-    lines.append("- `rmse_rev`：只在换向窗口内统计的 `e_q` RMSE（换向由 `qd_ref` 过零检测）")
+    lines.append(
+        "- `rmse_rev`：只在换向窗口内统计的 `e_q` RMSE（默认以 `qd_ref` 过零作为换向 seed，并在邻域内对齐到 `qd/qd_from_q` 的近零点）"
+    )
     lines.append("- `loop_p90`：主循环执行间隔的 90 分位（用于确认实时性可比）")
     lines.append("")
 
@@ -316,4 +400,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
